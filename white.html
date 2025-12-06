@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>White Hole — Pixel Trails (inside-out)</title>
+<style>
+  html,body{
+    margin:0;
+    height:100%;
+    background:#000;
+    color:#9aa;
+    overflow:hidden;
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+  }
+  #c{
+    position:fixed;
+    inset:0;
+    display:block;
+    cursor:default;
+  }
+  .hint{
+    position:fixed;
+    top:14px;
+    left:50%;
+    transform:translateX(-50%);
+    font-size:12px;
+    color:#cfc;
+    opacity:.8;
+    pointer-events:none;
+    letter-spacing:.3px;
+    mix-blend-mode:screen;
+    z-index:10;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hint">THE WHITE HOLE</div>
+
+<script>
+(() => {
+  const cvs  = document.getElementById('c');
+  const ctx  = cvs.getContext('2d', {alpha:false});
+
+  let W=0, H=0, dpr=1, SKY_R=0;
+
+  function fitCanvas(){
+    dpr = Math.min(2, window.devicePixelRatio||1);
+    const cssW = Math.floor(innerWidth);
+    const cssH = Math.floor(innerHeight);
+    cvs.style.width  = cssW + 'px';
+    cvs.style.height = cssH + 'px';
+    W = cvs.width  = Math.max(1, Math.floor(cssW*dpr));
+    H = cvs.height = Math.max(1, Math.floor(cssH*dpr));
+    SKY_R = Math.hypot(W,H)*0.60;
+  }
+  addEventListener('resize', fitCanvas, {passive:true});
+  fitCanvas();
+
+  const center = { x:()=>W*0.5, y:()=>H*0.5 };
+  const BH     = { r:()=>Math.min(W,H)*0.13, swallow:()=>Math.min(W,H)*0.145 };
+
+  // ===== 拖拽天空（和黑洞一致） =====
+  let dragging=false, lastX=0, lastY=0, yaw=0, pitch=0.55;
+  cvs.addEventListener('pointerdown', e=>{
+    dragging=true; lastX=e.clientX; lastY=e.clientY;
+  });
+  addEventListener('pointerup',   ()=>dragging=false);
+  addEventListener('pointerleave',()=>dragging=false);
+  addEventListener('pointermove', e=>{
+    if(!dragging) return;
+    const dx=e.clientX-lastX, dy=e.clientY-lastY;
+    yaw   += dx*0.003;
+    pitch += -dy*0.003;
+    pitch = Math.max(0.05, Math.min(1.25, pitch));
+    lastX=e.clientX; lastY=e.clientY;
+  }, {passive:true});
+
+  // ===== 星图（同黑洞） =====
+  let stars=[];
+  function initStars(){
+    stars.length=0;
+    const n=Math.floor((W*H)/(9000/dpr));
+    for(let i=0;i<n;i++){
+      stars.push({
+        az: Math.random()*Math.PI*2,
+        el: (Math.random()-0.5)*Math.PI*0.95,
+        mag:0.6+Math.random()*1.6
+      });
+    }
+  }
+  initStars();
+  addEventListener('resize', initStars, {passive:true});
+
+  const rotZ=(x,y,z,a)=>({x:x*Math.cos(a)-y*Math.sin(a),y:x*Math.sin(a)+y*Math.cos(a),z});
+  const rotX=(x,y,z,a)=>({x,y:y*Math.cos(a)-z*Math.sin(a),z:y*Math.sin(a)+z*Math.cos(a)});
+
+  function drawStars(){
+    const cx=center.x(), cy=center.y();
+    for(const s of stars){
+      const xe=Math.cos(s.el)*Math.cos(s.az);
+      const ye=Math.cos(s.el)*Math.sin(s.az);
+      const ze=Math.sin(s.el);
+      let v=rotZ(xe,ye,ze,yaw);
+      v=rotX(v.x,v.y,v.z,pitch*0.85);
+      const depth=(v.z+1)/2;
+      const size=(0.6+1.4*depth)*s.mag*dpr*0.6;
+      const alpha=0.30+0.45*depth;
+      ctx.fillStyle=`rgba(255,255,255,${alpha.toFixed(3)})`;
+      ctx.fillRect(cx+v.x*SKY_R, cy+v.y*SKY_R, size, size);
+    }
+  }
+
+  // ===== 工具函数 =====
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const smoothstep=(a,b,x)=>{
+    const t=clamp((x-a)/(b-a),0,1);
+    return t*t*(3-2*t);
+  };
+  function project3D(r,th){
+    const cx=center.x(), cy=center.y(), a=th+yaw;
+    const x0=r*Math.cos(a), y0=r*Math.sin(a);
+    return {x:cx+x0, y:cy+y0*Math.cos(pitch), z:y0*Math.sin(pitch)};
+  }
+
+  function ambientColor(){
+    const u=Math.random()*10;
+    if(u<7) return 'rgba(255,255,255,0.95)';
+    if(u<8) return 'rgba(191,231,255,0.95)';
+    if(u<9) return 'rgba(255,242,179,0.95)';
+    return 'rgba(255,189,189,0.95)';
+  }
+
+  function drawPixel(x,y,size,col){
+    ctx.fillStyle=col;
+    const s = size * (0.85 + Math.random()*0.35);
+    ctx.fillRect(x-s*0.5, y-s*0.5, s, s);
+  }
+
+  function trailDotsRadiusScaled(x,y,px,py,size,col, r){
+    if(px===0 && py===0) return;
+    const rFar = BH.r()*3.4;
+    const rNear= BH.r()*1.6;
+    const k = 1 + 4 * smoothstep(rFar, rNear, r);
+    const dx=x-px, dy=y-py;
+    const segLen=Math.hypot(dx,dy);
+    if(segLen<=0.0001) return;
+    const nx=dx/segLen, ny=dy/segLen;
+    const totalLen = segLen * k;
+    const step = Math.max(1, size*0.6);
+    for(let t=0; t<=totalLen; t+=step){
+      const qx = x - nx*t;
+      const qy = y - ny*t;
+      drawPixel(qx,qy, size*0.42, col);
+    }
+  }
+
+  function fadeScene(){
+    ctx.fillStyle='rgba(0,0,0,0.15)';
+    ctx.fillRect(0,0,W,H);
+  }
+
+  // ===== 白洞粒子（反向喷射） =====
+  const reverseTravelers=[];
+  const PX_BASE = 2.6*dpr * 2;
+
+  function spawnReverseTravelers(){
+    const count = 10;
+    for(let i=0;i<count;i++){
+      const theta0 = Math.random()*Math.PI*2;
+      reverseTravelers.push({
+        t:0,
+        r0: BH.r()*1.05,
+        theta0,
+        col: ambientColor(),
+        size: PX_BASE,
+        a: -0.0009 - Math.random()*0.0007, // a<0 → r 向外指数膨胀
+        w: +(0.0025 + Math.random()*0.0015),
+        px:0, py:0,
+        life: 3.0 + Math.random()*1.8
+      });
+    }
+  }
+
+  function drawHorizonWhite(){
+    const cx=center.x(), cy=center.y(), r=BH.r();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+  }
+
+  // ===== 从 black-hole 接收像素图，并做“旋转放大后消失”动画 =====
+  let whiteImg = null;
+  let imgAnimT = 0;                     // 当前动画时间（毫秒）
+  const IMG_ANIM_DURATION = 6000;       // 从 0% → 50% 所用时长（毫秒）
+  let whiteImgAngle = 0;                // 旋转角度
+
+  function startImageAnimationFromURL(url){
+    if(!url) return;
+    const img = new Image();
+    img.onload = () => {
+      whiteImg      = img;
+      imgAnimT      = 0;
+      whiteImgAngle = 0;
+    };
+    img.src = url;
+  }
+
+  function loadFromStorageOnce(){
+    const url = localStorage.getItem('whiteHoleImage');
+    if(!url) return;
+    startImageAnimationFromURL(url);
+  }
+
+  // 监听 black-hole 写入 localStorage
+  window.addEventListener('storage', (e)=>{
+    if(e.key === 'whiteHoleImage' && e.newValue){
+      startImageAnimationFromURL(e.newValue);
+    }
+  });
+
+  loadFromStorageOnce();
+
+  // ===== 主循环（始终处于“white-hole / inside”视觉） =====
+  ctx.fillStyle='#000';
+  ctx.fillRect(0,0,W,H);
+
+  let last = performance.now();
+  function tick(now){
+    const dt = now - last;
+    last = now;
+    const dtFactor = dt / 16.67;
+
+    // inside 视觉：整个画面绕中心旋转 180°
+    ctx.save();
+    ctx.translate(center.x(), center.y());
+    ctx.rotate(Math.PI);
+    ctx.translate(-center.x(), -center.y());
+
+    fadeScene();
+    drawStars();
+
+    // 持续喷射反向粒子
+    spawnReverseTravelers();
+
+    const rfar=[], rnear=[];
+    for(let i=reverseTravelers.length-1;i>=0;i--){
+      const p=reverseTravelers[i];
+      p.t += dt;
+
+      const r  = p.r0 * Math.exp(-p.a * p.t);
+      const th = p.theta0 + p.w * p.t;
+      const pos= project3D(r, th);
+      (pos.z<0 ? rfar : rnear).push({pos, p, r});
+      p.px = pos.x;
+      p.py = pos.y;
+
+      p.life -= 0.004*dtFactor;
+      if(p.life<=0 || r>SKY_R*1.4){
+        reverseTravelers.splice(i,1);
+      }
+    }
+
+    for(const d of rfar){
+      trailDotsRadiusScaled(d.pos.x,d.pos.y,d.p.px,d.p.py,d.p.size,d.p.col,d.r);
+      drawPixel(d.pos.x,d.pos.y,d.p.size,d.p.col);
+    }
+
+    drawHorizonWhite();
+
+    for(const d of rnear){
+      trailDotsRadiusScaled(d.pos.x,d.pos.y,d.p.px,d.p.py,d.p.size,d.p.col,d.r);
+      drawPixel(d.pos.x,d.pos.y,d.p.size,d.p.col);
+    }
+
+    // ========= 像素图的旋转放大 + 消失动画 =========
+    if(whiteImg){
+      imgAnimT += dt;
+      const progress = clamp(imgAnimT / IMG_ANIM_DURATION, 0, 1); // 0 → 1
+
+      // 从 0 → 0.5 * baseScale
+      const cx = center.x(), cy = center.y();
+      const maxW = W * 0.45;
+      const baseScale = Math.min(1, maxW / whiteImg.width); // 原计划最大显示比例
+      const scale = baseScale * 0.5 * progress;             // 0% → 50%
+
+      // 缓慢旋转
+      whiteImgAngle += dt * 0.0007; // 调大/调小可以改变旋转速度
+
+      // 末尾做一个轻微淡出（最后 20% 时间）
+      let alpha = 1;
+      if(progress > 0.8){
+        alpha = clamp(1 - (progress - 0.8) / 0.2, 0, 1);
+      }
+
+      if(scale > 0 && alpha > 0){
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(cx, cy);
+        ctx.rotate(whiteImgAngle);
+        ctx.scale(scale, scale);
+        // 用原始像素尺寸绘制，scale 控制大小
+        ctx.drawImage(whiteImg, -whiteImg.width/2, -whiteImg.height/2);
+        ctx.restore();
+      }
+
+      // 动画结束：清除图像，让画面回到纯白洞粒子状态
+      if(progress >= 1){
+        whiteImg = null;
+        imgAnimT = 0;
+        whiteImgAngle = 0;
+        // 可选：清掉已经用过的数据，避免刷新时再次读到
+        // localStorage.removeItem('whiteHoleImage');
+      }
+    }
+
+    ctx.restore(); // 结束 inside 旋转坐标
+
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

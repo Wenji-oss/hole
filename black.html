@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Black Hole — Pixel Trails (black-hole)</title>
+<style>
+  html,body{
+    margin:0;
+    height:100%;
+    background:#000;
+    color:#9aa;
+    overflow:hidden;
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+  }
+  #c{
+    position:fixed;
+    inset:0;
+    display:block;
+    cursor:default;
+  }
+  .hint{
+    position:fixed;
+    top:14px;
+    left:50%;
+    transform:translateX(-50%);
+    font-size:12px;
+    color:#cfc;
+    opacity:.8;
+    pointer-events:none;
+    letter-spacing:.3px;
+    mix-blend-mode:screen;
+    z-index:10;
+  }
+
+  /* can.svg 上传按钮 */
+  .rocket{
+    position:fixed;
+    left:4vw;
+    top:10vh;
+    width:10vw;
+    height:auto;
+    cursor:pointer;
+    z-index:11;
+  }
+  .rocket img{
+    width:50%;
+    height:auto;
+    display:block;
+    filter: drop-shadow(0 0 6px rgba(0,255,180,.5));
+    transition: filter .2s ease, opacity .15s ease;
+  }
+  .rocket:hover img{
+    filter:
+      hue-rotate(160deg)
+      saturate(180%)
+      brightness(1.1)
+      drop-shadow(0 0 8px rgba(0, 255, 220, .6));
+    opacity:.95;
+  }
+
+  /* 全屏按钮 */
+  .fs-btn{
+    position:fixed;
+    left:4vw;
+    top:calc(10vh + 10vw + 5vh);
+    width:10vw;
+    height:auto;
+    cursor:pointer;
+    z-index:11;
+    user-select:none;
+  }
+  .fs-btn svg{
+    display:block;
+    width:50%;
+    height:auto;
+    filter: drop-shadow(0 0 6px rgba(0,255,180,.5));
+  }
+  .fs-btn:hover svg{
+    filter:
+      hue-rotate(160deg)
+      saturate(180%)
+      brightness(1.1)
+      drop-shadow(0 0 8px rgba(0, 255, 220, .6));
+  }
+
+  #file{display:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hint" id="hint">THE BLACK HOLE</div>
+
+<!-- 上传按钮 -->
+<div class="rocket" id="rocket" title="Upload image" tabindex="0" role="button" aria-label="Upload image">
+  <img src="can.svg" alt="Upload image">
+</div>
+
+<!-- 全屏切换按钮 -->
+<div class="fs-btn" id="fsBtn" title="Toggle fullscreen" tabindex="0" role="button" aria-label="Toggle fullscreen">
+  <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <linearGradient id="gfs" x1="0" x2="1">
+        <stop offset="0" stop-color="#00ffd0"/><stop offset="1" stop-color="#00aaff"/>
+      </linearGradient>
+    </defs>
+    <path d="M8 8h16v6H14v10H8V8zm32 0h16v16h-6V14H40V8zm-34 32h6v10h10v6H8V40zm46 0h6v16H44v-6h10V40z" fill="url(#gfs)"/>
+  </svg>
+</div>
+
+<input id="file" type="file" accept="image/*"/>
+
+<script>
+(() => {
+  const cvs = document.getElementById('c');
+  const ctx = cvs.getContext('2d', {alpha:false});
+  const hint = document.getElementById('hint');
+  const rocket = document.getElementById('rocket');
+  const fsBtn = document.getElementById('fsBtn');
+  const file = document.getElementById('file');
+
+  let W=0, H=0, dpr=1, SKY_R=0;
+
+  function fitCanvas(){
+    dpr = Math.min(2, window.devicePixelRatio||1);
+    const cssW=Math.floor(innerWidth), cssH=Math.floor(innerHeight);
+    cvs.style.width=cssW+'px'; cvs.style.height=cssH+'px';
+    W=cvs.width=Math.max(1,Math.floor(cssW*dpr));
+    H=cvs.height=Math.max(1,Math.floor(cssH*dpr));
+    SKY_R=Math.hypot(W,H)*0.60;
+  }
+  addEventListener('resize', ()=>{fitCanvas(); initStars();}, {passive:true});
+  fitCanvas();
+
+  const center={x:()=>W*0.5,y:()=>H*0.5};
+  const BH={r:()=>Math.min(W,H)*0.13, swallow:()=>Math.min(W,H)*0.145};
+
+  // ===== Drag to tumble sky =====
+  let dragging=false,lastX=0,lastY=0,yaw=0,pitch=0.55;
+  cvs.addEventListener('pointerdown',e=>{dragging=true;lastX=e.clientX;lastY=e.clientY});
+  addEventListener('pointerup',()=>dragging=false);
+  addEventListener('pointerleave',()=>dragging=false);
+  addEventListener('pointermove',e=>{
+    if(!dragging) return;
+    const dx=e.clientX-lastX, dy=e.clientY-lastY;
+    yaw+=dx*0.003; pitch=Math.max(0.05, Math.min(1.25, pitch-dy*0.003));
+    lastX=e.clientX; lastY=e.clientY;
+  }, {passive:true});
+
+  // ===== Stars =====
+  let stars=[];
+  function initStars(){
+    stars.length=0;
+    const n=Math.floor((W*H)/(9000/dpr));
+    for(let i=0;i<n;i++) stars.push({az:Math.random()*Math.PI*2, el:(Math.random()-0.5)*Math.PI*0.95, mag:0.6+Math.random()*1.6});
+  }
+  initStars();
+  const rotZ=(x,y,z,a)=>({x:x*Math.cos(a)-y*Math.sin(a),y:x*Math.sin(a)+y*Math.cos(a),z});
+  const rotX=(x,y,z,a)=>({x,y:y*Math.cos(a)-z*Math.sin(a),z:y*Math.sin(a)+z*Math.cos(a)});
+  function drawStars(){
+    const cx=center.x(), cy=center.y();
+    for(const s of stars){
+      const xe=Math.cos(s.el)*Math.cos(s.az), ye=Math.cos(s.el)*Math.sin(s.az), ze=Math.sin(s.el);
+      let v=rotZ(xe,ye,ze,yaw); v=rotX(v.x,v.y,v.z,pitch*0.85);
+      const depth=(v.z+1)/2, size=(0.6+1.4*depth)*s.mag*dpr*0.6, alpha=0.30+0.45*depth;
+      ctx.fillStyle=`rgba(255,255,255,${alpha.toFixed(3)})`;
+      ctx.fillRect(cx+v.x*SKY_R, cy+v.y*SKY_R, size, size);
+    }
+  }
+
+  // ===== Utils =====
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const smoothstep=(a,b,x)=>{ const t=clamp((x-a)/(b-a),0,1); return t*t*(3-2*t); };
+  function project3D(r,th){
+    const cx=center.x(), cy=center.y(), a=th+yaw;
+    const x0=r*Math.cos(a), y0=r*Math.sin(a);
+    return {x:cx+x0, y:cy+y0*Math.cos(pitch), z:y0*Math.sin(pitch)};
+  }
+
+  // ===== Ambient palette =====
+  function ambientColor(){
+    const u=Math.random()*10;
+    if(u<7) return 'rgba(255,255,255,0.95)';
+    if(u<8) return 'rgba(191,231,255,0.95)';
+    if(u<9) return 'rgba(255,242,179,0.95)';
+    return 'rgba(255,189,189,0.95)';
+  }
+
+  // ===== Particles =====
+  const parts=[];
+  const PX_BASE = 2.6*dpr * 2;
+  const PX_ORBIT_GAIN = 1.1*dpr * 1.5;
+  const PX_TRAVELER = 2.8*dpr * 1.5;
+
+  function makeInfallFromDome(){
+    const az=Math.random()*Math.PI*2, el=(Math.random()-0.5)*Math.PI*0.95;
+    let v=rotZ(Math.cos(el)*Math.cos(az), Math.cos(el)*Math.sin(az), Math.sin(el), yaw);
+    v=rotX(v.x,v.y,v.z,pitch*0.85);
+    const sx=center.x()+v.x*SKY_R*(1.05+Math.random()*0.25);
+    const sy=center.y()+v.y*SKY_R*(1.05+Math.random()*0.25);
+    const r0=Math.hypot(sx-center.x(), sy-center.y()), th0=Math.atan2(sy-center.y(), sx-center.x());
+    return {
+      mode:'infall',
+      fromImage:false,
+      r:r0,
+      theta:th0,
+      col:ambientColor(),
+      size:PX_BASE,
+      vr:-0.08*dpr,
+      L:(0.45+Math.random()*0.45),
+      px:0, py:0
+    };
+  }
+  function makeOrbiter(r,theta,col,fromImage=false){
+    const t=clamp(1-(r-BH.r()*1.6)/(BH.r()*1.8),0,1);
+    return {
+      mode:'orbit',
+      fromImage,
+      r,
+      theta,
+      col: col||ambientColor(),
+      size:PX_BASE+PX_ORBIT_GAIN*t,
+      vr:-(0.03+0.03*Math.random())*dpr,
+      k:170*dpr,
+      p:1.12,
+      jitter:(Math.random()-0.5)*0.006,
+      px:0, py:0
+    };
+  }
+
+  // ===== Budgets =====
+  const AMBIENT_TARGET=1100, TOTAL_CAP=2000, IMG_SHARE_MAX=0.55;
+  function countAmbient(){ let c=0; for(const p of parts) if(!p.fromImage) c++; return c; }
+  function countImage(){ let c=0; for(const p of parts) if(p.fromImage) c++; return c; }
+
+  const travelersActive=[];
+  const reverseTravelers=[]; // 现在不会用到，但保持结构不动
+
+  function spawnAmbientByDeficit(){
+    const deficit = AMBIENT_TARGET - countAmbient();
+    const add = Math.max(0, Math.min(70, Math.floor(deficit*0.16)));
+    for(let i=0;i<add;i++) parts.push(makeInfallFromDome());
+  }
+  function enforceCaps(){
+    let imgCount=countImage();
+    let total=parts.length + travelersActive.length + reverseTravelers.length;
+    const imgCap=Math.floor(TOTAL_CAP*IMG_SHARE_MAX);
+    if(imgCount>imgCap){
+      let need=imgCount-imgCap;
+      for(let i=parts.length-1;i>=0 && need>0;i--){
+        const p=parts[i]; if(p.fromImage && p.r>BH.r()*2.6){ parts.splice(i,1); need--; imgCount--; total--; }
+      }
+      for(let i=travelersActive.length-1;i>=0 && need>0;i--){ travelersActive.splice(i,1); need--; total--; }
+    }
+    if(total>TOTAL_CAP){
+      let need=total-TOTAL_CAP;
+      for(let i=parts.length-1;i>=0 && need>0;i--){ if(parts[i].r>BH.r()*2.8){ parts.splice(i,1); need--; } }
+      for(let i=reverseTravelers.length-1;i>=0 && need>0;i--){ reverseTravelers.splice(i,1); need--; }
+      for(let i=travelersActive.length-1;i>=0 && need>0;i--){ travelersActive.splice(i,1); need--; }
+    }
+  }
+
+  const imageBodies=[];
+  let lastCapture = null;
+
+  let phase = 'normal'; // 我们不再进入 'inside'，但是保留变量
+
+  function fadeScene(){ ctx.fillStyle='rgba(0,0,0,0.15)'; ctx.fillRect(0,0,W,H); }
+
+  // 原来的 mosaic canvas 构建逻辑，保留给白洞使用
+  function buildMosaicCanvas(){
+    if(!lastCapture) return null;
+    const { gridW, gridH, gridRGBA } = lastCapture;
+    const targetW = Math.max(60, Math.floor(W * 0.05));
+    const CELL = Math.max(4, Math.floor(targetW / gridW));
+    const outW = gridW * CELL;
+    const outH = gridH * CELL;
+    const off=document.createElement('canvas');
+    off.width=outW; off.height=outH;
+    const octx=off.getContext('2d', {alpha:true});
+    octx.clearRect(0,0,outW,outH);
+    for(let gy=0; gy<gridH; gy++){
+      for(let gx=0; gx<gridW; gx++){
+        const idx=(gy*gridW+gx)*4;
+        const r=gridRGBA[idx], g=gridRGBA[idx+1], b=gridRGBA[idx+2], a=gridRGBA[idx+3];
+        if(a===0) continue;
+        octx.fillStyle=`rgba(${r},${g},${b},1)`;
+        octx.fillRect(gx*CELL, gy*CELL, CELL, CELL);
+      }
+    }
+    return off;
+  }
+
+  // 生成像素马赛克 dataURL，用于传给 white-hole
+  function buildPixelatedDataURL(){
+    if(!lastCapture) return null;
+    const { gridW, gridH, gridRGBA } = lastCapture;
+    const MAX_W = 1600;
+    let CELL = 16;
+    if(gridW * CELL > MAX_W) CELL = Math.max(6, Math.floor(MAX_W / gridW));
+    const outW = gridW * CELL, outH = gridH * CELL;
+    const off=document.createElement('canvas'); off.width=outW; off.height=outH;
+    const octx=off.getContext('2d',{alpha:true});
+    octx.fillStyle='#000'; octx.fillRect(0,0,outW,outH);
+    for(let gy=0; gy<gridH; gy++){
+      for(let gx=0; gx<gridW; gx++){
+        const idx=(gy*gridW+gx)*4;
+        const r=gridRGBA[idx], g=gridRGBA[idx+1], b=gridRGBA[idx+2], a=gridRGBA[idx+3];
+        if(a===0) continue;
+        octx.fillStyle=`rgba(${r},${g},${b},1)`;
+        octx.fillRect(gx*CELL, gy*CELL, CELL, CELL);
+      }
+    }
+    return off.toDataURL('image/png');
+  }
+
+  function spawnImageBody(img){
+    const targetW = Math.max(120*dpr, Math.floor(W*0.20));
+    const scale = targetW / (img.width*dpr);
+    const w=Math.floor(img.width*scale*dpr), h=Math.floor(img.height*scale*dpr);
+
+    const off=document.createElement('canvas'); off.width=w; off.height=h;
+    const octx=off.getContext('2d'); octx.imageSmoothingEnabled=true; octx.imageSmoothingQuality='high';
+    octx.drawImage(img,0,0,w,h);
+
+    const CELL = Math.max(6, Math.round(7*dpr));
+    const data=octx.getImageData(0,0,w,h).data;
+    const cells=[];
+    for(let y=0;y<h;y+=CELL){
+      for(let x=0;x<w;x+=CELL){
+        const idx=((y*w)+x)*4;
+        const a=data[idx+3]/255; if(a<0.1) continue;
+        const r=data[idx], g=data[idx+1], b=data[idx+2];
+        const col=`rgba(${r},${g},${b},0.95)`;
+        cells.push({ox:x-w/2, oy:y-h/2, col, removed:false});
+      }
+    }
+
+    // 导出给白洞的下采样数据
+    const aspect = w/h;
+    const gridW = clamp(Math.round(64 * Math.sqrt(aspect)), 32, 128);
+    const gridH = Math.max(1, Math.round(gridW / aspect));
+    const ds = document.createElement('canvas');
+    ds.width = gridW; ds.height = gridH;
+    const dctx = ds.getContext('2d');
+    dctx.imageSmoothingEnabled = true;
+    dctx.imageSmoothingQuality = 'high';
+    dctx.drawImage(off, 0, 0, gridW, gridH);
+    const gridData = dctx.getImageData(0, 0, gridW, gridH).data;
+    lastCapture = { gridW, gridH, gridRGBA: gridData, aspect: w/h };
+
+    const startX = -w*0.6, startY = center.y();
+    const r0 = Math.hypot(startX-center.x(), startY-center.y());
+    const th0= Math.atan2(startY-center.y(), startX-center.x());
+    imageBodies.push({
+      off,w,h,cells,total:cells.length, emitted:0,
+      r0, theta0:th0,
+      a_base:0.0003,
+      w_base:0.0005,
+      t:0, finished:false
+    });
+  }
+
+  function drawPixel(x,y,size,col){
+    ctx.fillStyle=col;
+    const s = size * (0.85 + Math.random()*0.35);
+    ctx.fillRect(x-s*0.5, y-s*0.5, s, s);
+  }
+  function trailDotsRadiusScaled(x,y,px,py,size,col, r){
+    if(px===0 && py===0) return;
+    const rFar = BH.r()*3.4;
+    const rNear= BH.r()*1.6;
+    const k = 1 + 4 * smoothstep(rFar, rNear, r);
+    const dx=x-px, dy=y-py, segLen=Math.hypot(dx,dy);
+    if(segLen<=0.0001) return;
+    const nx=dx/segLen, ny=dy/segLen;
+    const totalLen = segLen * k;
+    const step = Math.max(1, size*0.6);
+    for(let t=0; t<=totalLen; t+=step){
+      const qx = x - nx*t;
+      const qy = y - ny*t;
+      drawPixel(qx,qy, size*0.42, col);
+    }
+  }
+
+  function updateAndDrawImageBody(b, dt_ms){
+    const prog = b.emitted / Math.max(1,b.total);
+    const speedMul = 0.5 + 1.6*prog;
+    b.t += dt_ms;
+
+    const r = b.r0 * Math.exp(-(b.a_base*speedMul) * b.t);
+    const th= b.theta0 + (b.w_base*speedMul) * b.t;
+    const pos = project3D(r, th);
+
+    const EMIT = Math.min(18, Math.floor((4 + 26*prog) * (dt_ms/16.67)));
+    let emittedThisFrame = 0;
+    for(let i=0;i<b.cells.length && emittedThisFrame<EMIT;i++){
+      const c=b.cells[i]; if(c.removed) continue;
+      c.removed=true; b.emitted++; emittedThisFrame++;
+
+      const sx = pos.x + c.ox, sy = pos.y + c.oy;
+      const r0 = Math.hypot(sx-center.x(), sy-center.y());
+      const th0= Math.atan2(sy-center.y(), sx-center.x());
+
+      travelersActive.push({
+        t:0, bx:sx, by:sy, col:c.col, size:PX_TRAVELER,
+        r0: r0 + 30*(Math.random()-0.5),
+        theta0: th0 + (Math.random()-0.5)*0.06,
+        a: 0.0009 + Math.random()*0.0005,
+        w: (0.003 + Math.random()*0.0015) * 0.5,
+        px:0, py:0, joined:false, life:1.6+Math.random()*1.0,
+        fromImage: true
+      });
+    }
+
+    for(const c of b.cells){
+      if(c.removed) continue;
+      drawPixel(pos.x + c.ox, pos.y + c.oy, Math.max(PX_TRAVELER, 0.8*PX_TRAVELER), c.col);
+    }
+    if(b.emitted >= b.total) b.finished=true;
+  }
+
+  function allImagePixelsGone(){
+    let pendingCells = 0;
+    for(const b of imageBodies){
+      pendingCells += (b.total - b.emitted);
+    }
+    if(pendingCells > 0) return false;
+    if(travelersActive.length > 0) return false;
+    for(const p of parts){ if(p.fromImage) return false; }
+    return true;
+  }
+
+  function drawHorizon(){
+    const cx=center.x(), cy=center.y(), r=BH.r();
+    ctx.fillStyle = '#000';
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+  }
+
+  // 全屏
+  async function toggleFullscreen(){
+    try{
+      if(!document.fullscreenElement){
+        await document.documentElement.requestFullscreen();
+      }else{
+        await document.exitFullscreen();
+      }
+    }catch(e){
+      console.warn('Fullscreen error:', e);
+    }
+  }
+
+  rocket.addEventListener('click', ()=>file.click());
+  rocket.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' ') file.click(); });
+  fsBtn.addEventListener('click', toggleFullscreen);
+  fsBtn.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' ') toggleFullscreen(); });
+
+  file.addEventListener('change', e=>{
+    const f=e.target.files?.[0]; if(!f) return;
+    const img=new Image();
+    img.onload=()=>{ spawnImageBody(img); file.value=''; };
+    img.src=URL.createObjectURL(f);
+  });
+
+  // ===== Init & Main loop =====
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
+
+  let last=performance.now();
+  let sentToWhite = false;  // 避免重复发送
+
+  function tick(now){
+    const dt_ms=now-last; last=now;
+    const dtFactor = (dt_ms/16.67);
+
+    fadeScene();
+    drawStars();
+
+    // 持续维持黑洞环境的吸收粒子
+    spawnAmbientByDeficit();
+
+    // 图片主体（吸入）
+    for(let i=imageBodies.length-1;i>=0;i--){
+      const b=imageBodies[i];
+      updateAndDrawImageBody(b, dt_ms);
+      if(b.finished) imageBodies.splice(i,1);
+    }
+
+    // 从外层掉入的“旅行者”粒子
+    const tfar=[], tnear=[];
+    for(let i=travelersActive.length-1;i>=0;i--){
+      const p=travelersActive[i];
+      p.t += dt_ms;
+      const r=p.r0*Math.exp(-p.a*p.t), th=p.theta0+p.w*p.t, pos=project3D(r,th);
+      (pos.z<0?tfar:tnear).push({pos, p, r});
+      p.px=pos.x; p.py=pos.y;
+      if(!p.joined && r < BH.r()*3.0){
+        parts.push(makeOrbiter(clamp(r,BH.r()*1.6,BH.r()*3.0), th, p.col, p.fromImage));
+        p.joined=true;
+      }
+      p.life -= 0.006*dtFactor;
+      if(p.life<=0 || r < BH.swallow()*1.00) travelersActive.splice(i,1);
+    }
+
+    // 主粒子（轨道 + 吸入）
+    const far=[], near=[];
+    for(let i=parts.length-1;i>=0;i--){
+      const o=parts[i];
+      if(o.mode==='infall'){
+        const rSafe=Math.max(BH.r()*1.2, o.r);
+        const omega=-(o.L)*Math.pow(BH.r()*1.2/rSafe,1.35)*0.06*dtFactor;
+        o.theta+=omega;
+        o.vr += (-0.10*Math.pow(BH.r()/rSafe,1.8))*dtFactor;
+        o.r += o.vr*dtFactor;
+        if(o.r < BH.r()*2.35){
+          parts[i]=makeOrbiter(clamp(o.r,BH.r()*1.55,BH.r()*2.4), o.theta, o.col, o.fromImage);
+          continue;
+        }
+      }else{
+        const omega=-(o.k/Math.pow(Math.max(30,o.r),o.p))*dtFactor;
+        o.theta+=omega+o.jitter;
+        o.vr += (-0.006*Math.pow(BH.r()/Math.max(BH.r(),o.r),1.5))*dtFactor;
+        o.r += o.vr*dtFactor;
+      }
+      const pos=project3D(o.r,o.theta);
+      (pos.z<0?far:near).push({pos, o, r:o.r});
+      o.px=pos.x; o.py=pos.y;
+      if(o.r < BH.swallow()*1.00 || o.r > SKY_R*1.4){ parts.splice(i,1); }
+    }
+
+    // 画出所有前后层
+    for(const d of tfar){
+      trailDotsRadiusScaled(d.pos.x,d.pos.y,d.p.px,d.p.py,d.p.size,d.p.col,d.r);
+      drawPixel(d.pos.x,d.pos.y,d.p.size,d.p.col);
+    }
+    for(const d of far){
+      trailDotsRadiusScaled(d.pos.x,d.pos.y,d.o.px,d.o.py,(d.o.size||PX_BASE)*0.8,d.o.col,d.r);
+      drawPixel(d.pos.x,d.pos.y, d.o.size||PX_BASE, d.o.col);
+    }
+
+    drawHorizon();
+
+    for(const d of near){
+      trailDotsRadiusScaled(d.pos.x,d.pos.y,d.o.px,d.o.py,(d.o.size||PX_BASE)*0.8,d.o.col,d.r);
+      drawPixel(d.pos.x,d.pos.y, d.o.size||PX_BASE, d.o.col);
+    }
+    for(const d of tnear){
+      trailDotsRadiusScaled(d.pos.x,d.pos.y,d.p.px,d.p.py,d.p.size,d.p.col,d.r);
+      drawPixel(d.pos.x,d.pos.y,d.p.size,d.p.col);
+    }
+
+    // 提示文字
+    hint.textContent = 'THE BLACK HOLE';
+
+    // ✅ 核心：当图片全部被吸收后，把像素图 dataURL 传给 white-hole
+    if(lastCapture && allImagePixelsGone() && !sentToWhite){
+      const url = buildPixelatedDataURL();
+      if(url){
+        localStorage.setItem('whiteHoleImage', url);
+        localStorage.setItem('whiteHoleTime', Date.now().toString());
+      }
+      sentToWhite = true;
+    }
+
+    enforceCaps();
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
